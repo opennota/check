@@ -22,9 +22,12 @@ import (
 	"sort"
 	"unsafe"
 
+	"go/types"
+
+	"strings"
+
 	"github.com/kisielk/gotool"
 	"golang.org/x/tools/go/loader"
-	"go/types"
 )
 
 var stdSizes = types.StdSizes{
@@ -32,7 +35,17 @@ var stdSizes = types.StdSizes{
 	MaxAlign: 8,
 }
 
+type (
+	structField struct {
+		name string
+		size int
+	}
+
+	fieldList []structField
+)
+
 func main() {
+	vPtr := flag.Bool("v", false, "verbose output (outputs recommended alignments)")
 	flag.Parse()
 	exitStatus := 0
 
@@ -86,12 +99,17 @@ func main() {
 				structSize += structAlign - structSize%structAlign
 			}
 
+			fields := make(fieldList, 0, strukt.NumFields())
 			minSize := 0
 			for i := 0; i < strukt.NumFields(); i++ {
 				field := strukt.Field(i)
 				fieldType := field.Type()
 				typeSize := int(stdSizes.Sizeof(fieldType))
 				minSize += typeSize
+				fields = append(fields, structField{
+					name: field.Name(),
+					size: typeSize,
+				})
 			}
 			if minSize%structAlign != 0 {
 				minSize += structAlign - minSize%structAlign
@@ -99,7 +117,16 @@ func main() {
 
 			if minSize != structSize {
 				pos := program.Fset.Position(obj.Pos())
-				lines = append(lines, fmt.Sprintf(
+				fieldLines := make([]string, 0, len(fields))
+				sort.Sort(fields)
+				for _, v := range fields {
+					fieldLines = append(fieldLines, fmt.Sprintf(
+						"\t\t%s (size %d)",
+						v.name,
+						v.size,
+					))
+				}
+				line := fmt.Sprintf(
 					"%s: %s:%d:%d: struct %s could have size %d (currently %d)",
 					obj.Pkg().Path(),
 					pos.Filename,
@@ -108,7 +135,14 @@ func main() {
 					obj.Name(),
 					minSize,
 					structSize,
-				))
+				)
+				if *vPtr {
+					line = line + fmt.Sprintf(
+						":\n\tRecommended alignment:\n%s",
+						strings.Join(fieldLines, "\n"),
+					)
+				}
+				lines = append(lines, line)
 				exitStatus = 1
 			}
 		}
@@ -121,3 +155,17 @@ func main() {
 
 	os.Exit(exitStatus)
 }
+
+func (fl fieldList) Len() int { return len(fl) }
+func (fl fieldList) Less(i, j int) bool {
+	switch {
+	case fl[i].size > fl[j].size:
+		return true
+	case fl[i].size < fl[j].size:
+		return false
+	case fl[i].name < fl[j].name:
+		return true
+	}
+	return false
+}
+func (fl fieldList) Swap(i, j int) { fl[i], fl[j] = fl[j], fl[i] }
