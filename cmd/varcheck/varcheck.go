@@ -24,13 +24,15 @@ import (
 	"sort"
 	"strings"
 
+	"go/types"
+
 	"github.com/kisielk/gotool"
 	"golang.org/x/tools/go/loader"
-	"go/types"
 )
 
 var (
 	reportExported = flag.Bool("e", false, "Report exported variables and constants")
+	buildTags      = flag.String("tags", "", "Build tags")
 )
 
 type object struct {
@@ -136,6 +138,9 @@ func main() {
 	}
 
 	ctx := build.Default
+	if *buildTags != "" {
+		ctx.BuildTags = strings.Split(*buildTags, ",")
+	}
 	loadcfg := loader.Config{
 		Build: &ctx,
 	}
