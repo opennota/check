@@ -48,7 +48,7 @@ func main() {
 
 	ctx := build.Default
 	if *buildTags != "" {
-		ctx.BuildTags = strings.Split(*buildTags, ",")
+		ctx.BuildTags = strings.Fields(*buildTags)
 	}
 	loadcfg := loader.Config{
 		Build: &ctx,
