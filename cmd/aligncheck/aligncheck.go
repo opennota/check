@@ -20,17 +20,22 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strings"
 	"unsafe"
+
+	"go/types"
 
 	"github.com/kisielk/gotool"
 	"golang.org/x/tools/go/loader"
-	"go/types"
 )
 
-var stdSizes = types.StdSizes{
-	WordSize: int64(unsafe.Sizeof(int(0))),
-	MaxAlign: 8,
-}
+var (
+	stdSizes = types.StdSizes{
+		WordSize: int64(unsafe.Sizeof(int(0))),
+		MaxAlign: 8,
+	}
+	buildTags = flag.String("tags", "", "Build tags")
+)
 
 func main() {
 	flag.Parse()
@@ -42,6 +47,9 @@ func main() {
 	}
 
 	ctx := build.Default
+	if *buildTags != "" {
+		ctx.BuildTags = strings.Fields(*buildTags)
+	}
 	loadcfg := loader.Config{
 		Build: &ctx,
 	}
