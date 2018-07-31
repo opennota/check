@@ -18,13 +18,11 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
-	"go/build"
 	"go/types"
+	"log"
 	"os"
-	"strings"
 
-	"github.com/kisielk/gotool"
-	"golang.org/x/tools/go/loader"
+	"golang.org/x/tools/go/packages"
 )
 
 var (
@@ -35,8 +33,7 @@ var (
 )
 
 type visitor struct {
-	prog *loader.Program
-	pkg  *loader.PackageInfo
+	pkg  *packages.Package
 	m    map[types.Type]map[string]int
 	skip map[types.Type]struct{}
 }
@@ -63,7 +60,7 @@ func (v *visitor) assignment(t types.Type, fieldName string) {
 
 func (v *visitor) typeSpec(node *ast.TypeSpec) {
 	if strukt, ok := node.Type.(*ast.StructType); ok {
-		t := v.pkg.Info.Defs[node.Name].Type()
+		t := v.pkg.TypesInfo.Defs[node.Name].Type()
 		for _, f := range strukt.Fields.List {
 			if len(f.Names) > 0 {
 				fieldName := f.Names[0].Name
@@ -74,7 +71,7 @@ func (v *visitor) typeSpec(node *ast.TypeSpec) {
 }
 
 func (v *visitor) typeAndFieldName(expr *ast.SelectorExpr) (types.Type, string, bool) {
-	selection := v.pkg.Info.Selections[expr]
+	selection := v.pkg.TypesInfo.Selections[expr]
 	if selection == nil {
 		return nil, "", false
 	}
@@ -105,7 +102,7 @@ func (v *visitor) assignStmt(node *ast.AssignStmt) {
 }
 
 func (v *visitor) compositeLiteral(node *ast.CompositeLit) {
-	t := v.pkg.Info.Types[node.Type].Type
+	t := v.pkg.TypesInfo.Types[node.Type].Type
 	for _, expr := range node.Elts {
 		if kv, ok := expr.(*ast.KeyValueExpr); ok {
 			if ident, ok := kv.Key.(*ast.Ident); ok {
@@ -147,41 +144,34 @@ func (v *visitor) Visit(node ast.Node) ast.Visitor {
 func main() {
 	flag.Parse()
 	exitStatus := 0
-	importPaths := gotool.ImportPaths(flag.Args())
+	importPaths := flag.Args()
 	if len(importPaths) == 0 {
 		importPaths = []string{"."}
 	}
-	ctx := build.Default
+
+	var flags []string
 	if *buildTags != "" {
-		ctx.BuildTags = strings.Split(*buildTags, ",")
+		flags = append(flags, fmt.Sprintf("-tags=%s", *buildTags))
 	}
-	loadcfg := loader.Config{
-		Build: &ctx,
+	cfg := &packages.Config{
+		Mode:  packages.LoadSyntax,
+		Tests: *loadTestFiles,
+		Flags: flags,
+		Error: func(error) {}, // don't print type check errors
 	}
-	rest, err := loadcfg.FromArgs(importPaths, *loadTestFiles)
+	pkgs, err := packages.Load(cfg, importPaths...)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "could not parse arguments: %s", err)
-		os.Exit(1)
-	}
-	if len(rest) > 0 {
-		fmt.Fprintf(os.Stderr, "unhandled extra arguments: %v", rest)
-		os.Exit(1)
+		log.Fatalf("could not load packages: %s", err)
 	}
 
-	program, err := loadcfg.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "could not type check: %s", err)
-		os.Exit(1)
-	}
-
-	for _, pkg := range program.InitialPackages() {
+	reported := make(map[string]bool) // track already reported information.
+	for _, pkg := range pkgs {
 		visitor := &visitor{
 			m:    make(map[types.Type]map[string]int),
 			skip: make(map[types.Type]struct{}),
-			prog: program,
 			pkg:  pkg,
 		}
-		for _, f := range pkg.Files {
+		for _, f := range pkg.Syntax {
 			ast.Walk(visitor, f)
 		}
 
@@ -194,9 +184,10 @@ func main() {
 					continue
 				}
 				if v == 0 {
-					field, _, _ := types.LookupFieldOrMethod(t, false, pkg.Pkg, fieldName)
+					field, _, _ := types.LookupFieldOrMethod(t, false, pkg.Types, fieldName)
 					if field == nil {
-						fmt.Printf("%s: unknown field or method: %s.%s\n", pkg.Pkg.Path(), t, fieldName)
+						unknown := fmt.Sprintf("%s: unknown field or method: %s.%s\n", pkg.Types.Path(), t, fieldName)
+						report(unknown, reported)
 						exitStatus = 1
 						continue
 					}
@@ -205,15 +196,24 @@ func main() {
 							continue
 						}
 					}
-					pos := program.Fset.Position(field.Pos())
-					fmt.Printf("%s: %s:%d:%d: %s.%s\n",
-						pkg.Pkg.Path(), pos.Filename, pos.Line, pos.Column,
+					pos := pkg.Fset.Position(field.Pos())
+					unused := fmt.Sprintf("%s: %s:%d:%d: %s.%s\n",
+						pkg.Types.Path(), pos.Filename, pos.Line, pos.Column,
 						types.TypeString(t, nil), fieldName,
 					)
+					report(unused, reported)
 					exitStatus = 1
 				}
 			}
 		}
 	}
 	os.Exit(exitStatus)
+}
+
+func report(message string, reported map[string]bool) {
+	if reported[message] {
+		return
+	}
+	fmt.Print(message)
+	reported[message] = true
 }

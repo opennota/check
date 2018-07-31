@@ -16,17 +16,14 @@ package main
 import (
 	"flag"
 	"fmt"
-	"go/build"
 	"log"
 	"os"
 	"sort"
-	"strings"
 	"unsafe"
 
 	"go/types"
 
-	"github.com/kisielk/gotool"
-	"golang.org/x/tools/go/loader"
+	"golang.org/x/tools/go/packages"
 )
 
 var (
@@ -41,35 +38,28 @@ func main() {
 	flag.Parse()
 	exitStatus := 0
 
-	importPaths := gotool.ImportPaths(flag.Args())
+	importPaths := flag.Args()
 	if len(importPaths) == 0 {
 		importPaths = []string{"."}
 	}
 
-	ctx := build.Default
+	var flags []string
 	if *buildTags != "" {
-		ctx.BuildTags = strings.Fields(*buildTags)
+		flags = append(flags, fmt.Sprintf("-tags=%s", *buildTags))
 	}
-	loadcfg := loader.Config{
-		Build: &ctx,
+	cfg := &packages.Config{
+		Mode:  packages.LoadSyntax,
+		Flags: flags,
+		Error: func(error) {}, // don't print type check errors
 	}
-	rest, err := loadcfg.FromArgs(importPaths, false)
+	pkgs, err := packages.Load(cfg, importPaths...)
 	if err != nil {
-		log.Fatalf("could not parse arguments: %s", err)
-	}
-	if len(rest) > 0 {
-		log.Fatalf("unhandled extra arguments: %v", rest)
-	}
-
-	program, err := loadcfg.Load()
-	if err != nil {
-		log.Fatalf("could not type check: %s", err)
+		log.Fatalf("could not load packages: %s", err)
 	}
 
 	var lines []string
-
-	for _, pkgInfo := range program.InitialPackages() {
-		for _, obj := range pkgInfo.Defs {
+	for _, pkg := range pkgs {
+		for _, obj := range pkg.TypesInfo.Defs {
 			if obj == nil {
 				continue
 			}
@@ -106,7 +96,7 @@ func main() {
 			}
 
 			if minSize != structSize {
-				pos := program.Fset.Position(obj.Pos())
+				pos := pkg.Fset.Position(obj.Pos())
 				lines = append(lines, fmt.Sprintf(
 					"%s: %s:%d:%d: struct %s could have size %d (currently %d)",
 					obj.Pkg().Path(),

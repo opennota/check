@@ -17,7 +17,6 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
-	"go/build"
 	"go/token"
 	"log"
 	"os"
@@ -26,8 +25,7 @@ import (
 
 	"go/types"
 
-	"github.com/kisielk/gotool"
-	"golang.org/x/tools/go/loader"
+	"golang.org/x/tools/go/packages"
 )
 
 var (
@@ -41,8 +39,7 @@ type object struct {
 }
 
 type visitor struct {
-	prog       *loader.Program
-	pkg        *loader.PackageInfo
+	pkg        *packages.Package
 	uses       map[object]int
 	positions  map[object]token.Position
 	insideFunc bool
@@ -71,7 +68,7 @@ func (v *visitor) decl(obj types.Object) {
 		v.uses[key] = 0
 	}
 	if _, ok := v.positions[key]; !ok {
-		v.positions[key] = v.prog.Fset.Position(obj.Pos())
+		v.positions[key] = v.pkg.Fset.Position(obj.Pos())
 	}
 }
 
@@ -91,13 +88,13 @@ func isReserved(name string) bool {
 func (v *visitor) Visit(node ast.Node) ast.Visitor {
 	switch node := node.(type) {
 	case *ast.Ident:
-		v.use(v.pkg.Info.Uses[node])
+		v.use(v.pkg.TypesInfo.Uses[node])
 
 	case *ast.ValueSpec:
 		if !v.insideFunc {
 			for _, ident := range node.Names {
 				if !isReserved(ident.Name) {
-					v.decl(v.pkg.Info.Defs[ident])
+					v.decl(v.pkg.TypesInfo.Defs[ident])
 				}
 			}
 		}
@@ -132,47 +129,37 @@ func (v *visitor) Visit(node ast.Node) ast.Visitor {
 func main() {
 	flag.Parse()
 	exitStatus := 0
-	importPaths := gotool.ImportPaths(flag.Args())
+	importPaths := flag.Args()
 	if len(importPaths) == 0 {
 		importPaths = []string{"."}
 	}
 
-	ctx := build.Default
+	var flags []string
 	if *buildTags != "" {
-		ctx.BuildTags = strings.Fields(*buildTags)
+		flags = append(flags, fmt.Sprintf("-tags=%s", *buildTags))
 	}
-	loadcfg := loader.Config{
-		Build: &ctx,
+	cfg := &packages.Config{
+		Mode:  packages.LoadSyntax,
+		Tests: true,
+		Flags: flags,
+		Error: func(error) {}, // don't print type check errors
 	}
-	rest, err := loadcfg.FromArgs(importPaths, true)
+	pkgs, err := packages.Load(cfg, importPaths...)
 	if err != nil {
-		log.Fatalf("could not parse arguments: %s", err)
-	}
-	if len(rest) > 0 {
-		log.Fatalf("unhandled extra arguments: %v", rest)
-	}
-
-	program, err := loadcfg.Load()
-	if err != nil {
-		log.Fatalf("could not type check: %s", err)
+		log.Fatalf("could not load packages: %s", err)
 	}
 
 	uses := make(map[object]int)
 	positions := make(map[object]token.Position)
 
-	for _, pkgInfo := range program.InitialPackages() {
-		if pkgInfo.Pkg.Path() == "unsafe" {
-			continue
-		}
-
+	for _, pkg := range pkgs {
 		v := &visitor{
-			prog:      program,
-			pkg:       pkgInfo,
+			pkg:       pkg,
 			uses:      uses,
 			positions: positions,
 		}
 
-		for _, f := range v.pkg.Files {
+		for _, f := range v.pkg.Syntax {
 			ast.Walk(v, f)
 		}
 	}
