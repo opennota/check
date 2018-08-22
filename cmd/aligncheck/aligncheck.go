@@ -49,7 +49,7 @@ func main() {
 	}
 	cfg := &packages.Config{
 		Mode:  packages.LoadSyntax,
-		Flags: flags,
+		BuildFlags: flags,
 		Error: func(error) {}, // don't print type check errors
 	}
 	pkgs, err := packages.Load(cfg, importPaths...)

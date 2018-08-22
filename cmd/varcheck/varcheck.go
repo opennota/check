@@ -141,7 +141,7 @@ func main() {
 	cfg := &packages.Config{
 		Mode:  packages.LoadSyntax,
 		Tests: true,
-		Flags: flags,
+		BuildFlags: flags,
 		Error: func(error) {}, // don't print type check errors
 	}
 	pkgs, err := packages.Load(cfg, importPaths...)
