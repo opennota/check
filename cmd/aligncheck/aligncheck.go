@@ -48,7 +48,7 @@ func main() {
 		flags = append(flags, fmt.Sprintf("-tags=%s", *buildTags))
 	}
 	cfg := &packages.Config{
-		Mode:  packages.LoadSyntax,
+		Mode:       packages.LoadSyntax,
 		BuildFlags: flags,
 	}
 	pkgs, err := packages.Load(cfg, importPaths...)
