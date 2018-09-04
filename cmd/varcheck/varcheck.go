@@ -139,10 +139,9 @@ func main() {
 		flags = append(flags, fmt.Sprintf("-tags=%s", *buildTags))
 	}
 	cfg := &packages.Config{
-		Mode:  packages.LoadSyntax,
-		Tests: true,
+		Mode:       packages.LoadSyntax,
+		Tests:      true,
 		BuildFlags: flags,
-		Error: func(error) {}, // don't print type check errors
 	}
 	pkgs, err := packages.Load(cfg, importPaths...)
 	if err != nil {
