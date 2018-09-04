@@ -142,7 +142,6 @@ func main() {
 		Mode:  packages.LoadSyntax,
 		Tests: true,
 		BuildFlags: flags,
-		Error: func(error) {}, // don't print type check errors
 	}
 	pkgs, err := packages.Load(cfg, importPaths...)
 	if err != nil {
